@@ -13,9 +13,3 @@ return r.text()
 //console.log(d)
 })
 .catch(e => console.log(e))
-
-
-if (window.location.href == "https://sota.vision/sotacats") {
-alert("МЯУ!");
-window.location.href = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
-}
