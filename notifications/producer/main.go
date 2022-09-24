@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
@@ -11,7 +12,7 @@ import (
 )
 
 var (
-	queueURL = aws.String("https://sqs.eu-central-1.amazonaws.com/136160194617/gosreq-notifications")
+	queueURL = aws.String(os.Getenv("SQS_URL"))
 )
 
 type Response struct {
