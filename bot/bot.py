@@ -1,5 +1,5 @@
 from aiogram.dispatcher.filters import Filter
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, types, exceptions
 from aiogram.types import ParseMode
 from aiogram.utils import executor
 
@@ -9,6 +9,7 @@ import datetime
 import random
 import asyncio
 import uuid
+import re
 import os
 
 from db_utils import session_scope, prepare_db
@@ -40,6 +41,16 @@ class EditTrackerName(Filter):
                 .limit(1)
             r = (await session.execute(q)).one()
             return r[0] == 'edit_tracker_name'
+
+
+class AddToChat(Filter):
+    async def check(self, message: types.Message):
+        async with session_scope() as session:
+            q = select(models.Users.action, models.Users.state) \
+                .where(models.Users.telegram_id == message.from_user.id) \
+                .limit(1)
+            r = (await session.execute(q)).one()
+            return r[0] == 'add_to_chat'
 
 
 class PrivateMessage(Filter):
@@ -166,7 +177,7 @@ async def edit_tracker(query: types.CallbackQuery):
         keyboard_markup = types.InlineKeyboardMarkup(row_width=6)
         text_and_data = (
             [
-                ('История заходов', f'requests_history={tid}'),
+                ('Добавить в чат ', f'add_to_chat={tid}'),
                 ('Код для сайта', f'get_code={tid}')
             ],
             [
@@ -279,7 +290,50 @@ async def get_code(query: types.CallbackQuery):
                                 parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard_markup)
 
 
+@dp.callback_query_handler(regexp=r"^add_to_chat=(.*-.*-.*-.*)$")
+async def get_code(query: types.CallbackQuery):
+    tid = query.data.split('=')[1]
+    data = f"Добавь меня в чат и пришли мне id"
+    await bot.edit_message_text(data,
+                                query.message.chat.id, query.message.message_id,
+                                parse_mode=ParseMode.MARKDOWN)
+    async with session_scope() as session:
+        await session.execute(update(models.Users).where(models.Users.telegram_id == query.from_user.id)
+                              .values(action="add_to_chat", state=tid))
 
+
+@dp.message_handler(AddToChat(), PrivateMessage())
+async def add_to_chat(message: types.Message):
+    m = re.match(r'^[-]?[0-9]+$', message.text)
+    if m is None:
+        await message.reply('Это не похоже на id чата')
+        return
+    async with session_scope() as session:
+        q = select(models.Users.state) \
+            .where(models.Users.telegram_id == message.from_user.id) \
+            .limit(1)
+        r = (await session.execute(q)).one()
+
+        try:
+            await bot.send_message(int(message.text), f"Трекер {r[0]} включен в этом чате")
+        except exceptions.ChatNotFound:
+            await message.reply('Я не добавен в чат с таким id :(')
+            return
+
+        await session.execute(insert(models.Notification).values(uuid=uuid.uuid4(),
+                                                                 tracker_uuid=r[0],
+                                                                 chat_id=int(message.text),
+                                                                 enable=True))
+        await session.execute(update(models.Users).where(models.Users.telegram_id == message.from_user.id)
+                              .values(action=None, state=None))
+    await message.reply('Бот успешно добавлен в чат')
+
+
+@dp.my_chat_member_handler()
+async def added_to_chat(my_chat_member: types.ChatMemberUpdated):
+    await bot.send_message(my_chat_member.chat.id, f'id этого чата: `{my_chat_member.chat.id}`\n'
+                                                   f'Открой настройки трекера, нажми "добавить в чат" и пришли этот id',
+                           parse_mode=ParseMode.MARKDOWN)
 
 
 if __name__ == "__main__":
